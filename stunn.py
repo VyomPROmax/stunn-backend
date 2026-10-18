@@ -16,7 +16,7 @@ load_dotenv()
 
 APP_NAME = "Stunn"
 APP_VERSION = "2.0.0"
-MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 MAX_TOKENS = int(os.getenv("STUNN_MAX_TOKENS", "2048"))
 TEMPERATURE = float(os.getenv("STUNN_TEMPERATURE", "0.7"))
 
@@ -334,4 +334,3 @@ if __name__ == "__main__":
     print("API: http://0.0.0.0:8000")
     print("Health: http://0.0.0.0:8000/health")
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
-
