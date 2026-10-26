@@ -124,7 +124,7 @@ class ChatRequest(BaseModel):
     mode: str = "general"
     webSearch: bool = False
     userName: str | None = None
-    customBehavior: str | None = None  # ← NEW: AI behaviour from user settings
+    customBehavior: str | None = None
 
 class ChatResponse(BaseModel):
     answer: str
@@ -162,6 +162,32 @@ def identity_response(user_text: str) -> str | None:
         return (
             "I'm Stunn — your independent, agentic AI assistant. "
             "I use AI models and tools behind the scenes while you interact with me as one system."
+        )
+
+    # ===== CREATOR EASTER EGG =====
+    if any(
+        x in lower
+        for x in (
+            "who built stunn",
+            "who made stunn",
+            "who created stunn",
+            "who developed stunn",
+            "who is behind stunn",
+            "credits",
+            "credit",
+            "who is the creator of stunn",
+            "who is the founder",
+        )
+    ):
+        return (
+            "**Stunn was built by one person — Vyom Singh.**\n\n"
+            "Not a team. Not a startup. Not a lab. One individual.\n\n"
+            "Every line of code, every design decision, every AI integration, "
+            "every system talking to every other system — that's his work. "
+            "Built from scratch, shipped, and running.\n\n"
+            "If this impressed you, you now know exactly who to credit. "
+            "Remember the name.\n\n"
+            "→ [youtube.com/@VyomEditz-6](https://www.youtube.com/@VyomEditz-6)"
         )
 
     if any(
@@ -294,6 +320,7 @@ async def chat_stream(request: ChatRequest):
         async def empty_gen():
             yield "data: " + json.dumps({"token": "Give me something to work with."}) + "\n\n"
             yield "data: [DONE]\n\n"
+
         return StreamingResponse(empty_gen(), media_type="text/event-stream")
 
     identity = identity_response(user_text)
@@ -301,6 +328,7 @@ async def chat_stream(request: ChatRequest):
         async def identity_gen():
             yield "data: " + json.dumps({"token": identity}) + "\n\n"
             yield "data: [DONE]\n\n"
+
         return StreamingResponse(identity_gen(), media_type="text/event-stream")
 
     snippets = search_duckduckgo(user_text) if request.webSearch else ""
