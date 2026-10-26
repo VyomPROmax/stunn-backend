@@ -123,6 +123,8 @@ class ChatRequest(BaseModel):
     sessionId: str | None = None
     mode: str = "general"
     webSearch: bool = False
+    userName: str | None = None
+    customBehavior: str | None = None  # ← NEW: AI behaviour from user settings
 
 class ChatResponse(BaseModel):
     answer: str
@@ -195,8 +197,14 @@ def identity_response(user_text: str) -> str | None:
 
     return None
 
-def build_system_prompt(mode: str, web_search_snippets: str = "") -> str:
+def build_system_prompt(mode: str, web_search_snippets: str = "", custom_behavior: str = "") -> str:
     prompt = STUNN_SYSTEM + MODE_PROMPTS.get(mode, "")
+    if custom_behavior and custom_behavior.strip():
+        prompt += (
+            f"\n\n[USER CUSTOM BEHAVIOR & PERSONA INSTRUCTIONS]:\n"
+            f"{custom_behavior.strip()}\n"
+            f"Strictly adhere to the user's custom instructions above across all responses."
+        )
     if web_search_snippets:
         prompt += (
             f"\n\n[LIVE WEB SEARCH INFORMATION]:\n{web_search_snippets}\n"
@@ -204,10 +212,16 @@ def build_system_prompt(mode: str, web_search_snippets: str = "") -> str:
         )
     return prompt
 
-async def ask_groq(user_text: str, session_id: str, mode: str = "general", web_search: bool = False) -> str:
+async def ask_groq(
+    user_text: str,
+    session_id: str,
+    mode: str = "general",
+    web_search: bool = False,
+    custom_behavior: str = "",
+) -> str:
     client = get_client()
     snippets = search_duckduckgo(user_text) if web_search else ""
-    system_content = build_system_prompt(mode, snippets)
+    system_content = build_system_prompt(mode, snippets, custom_behavior)
 
     messages = [
         {"role": "system", "content": system_content},
@@ -227,12 +241,18 @@ async def ask_groq(user_text: str, session_id: str, mode: str = "general", web_s
         raise RuntimeError("The AI model returned an empty response.")
     return content.strip()
 
-async def answer_as_stunn(user_text: str, session_id: str, mode: str = "general", web_search: bool = False) -> str:
+async def answer_as_stunn(
+    user_text: str,
+    session_id: str,
+    mode: str = "general",
+    web_search: bool = False,
+    custom_behavior: str = "",
+) -> str:
     identity = identity_response(user_text)
     if identity is not None:
         return identity
 
-    answer = await ask_groq(user_text, session_id, mode, web_search)
+    answer = await ask_groq(user_text, session_id, mode, web_search, custom_behavior)
     add_to_history(session_id, "user", user_text)
     add_to_history(session_id, "assistant", answer)
     return answer
@@ -252,7 +272,13 @@ async def chat(request: ChatRequest):
     session_id = request.sessionId or "default"
 
     try:
-        answer = await answer_as_stunn(user_text, session_id, request.mode, request.webSearch)
+        answer = await answer_as_stunn(
+            user_text,
+            session_id,
+            request.mode,
+            request.webSearch,
+            request.customBehavior or "",
+        )
     except Exception as exc:
         print(f"[STUNN ERROR] {exc}")
         answer = "I hit a backend problem while processing that. Check the Stunn terminal for the exact error."
@@ -268,7 +294,6 @@ async def chat_stream(request: ChatRequest):
         async def empty_gen():
             yield "data: " + json.dumps({"token": "Give me something to work with."}) + "\n\n"
             yield "data: [DONE]\n\n"
-
         return StreamingResponse(empty_gen(), media_type="text/event-stream")
 
     identity = identity_response(user_text)
@@ -276,11 +301,10 @@ async def chat_stream(request: ChatRequest):
         async def identity_gen():
             yield "data: " + json.dumps({"token": identity}) + "\n\n"
             yield "data: [DONE]\n\n"
-
         return StreamingResponse(identity_gen(), media_type="text/event-stream")
 
     snippets = search_duckduckgo(user_text) if request.webSearch else ""
-    system_content = build_system_prompt(request.mode, snippets)
+    system_content = build_system_prompt(request.mode, snippets, request.customBehavior or "")
 
     messages = [
         {"role": "system", "content": system_content},
