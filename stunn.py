@@ -365,8 +365,13 @@ async def chat_stream(request: ChatRequest):
                 add_to_history(session_id, "user", user_text)
                 add_to_history(session_id, "assistant", full_reply)
         except Exception as exc:
-            print(f"[STREAM ERROR] {exc}")
-            yield f"data: {json.dumps({'token': ' [Error generating response]'})}\n\n"
+            err_msg = str(exc)
+            print(f"[STREAM ERROR] {err_msg}")
+            # If prompt was too big or hit rate/token limits, give a clear friendly message
+            if "context_length_exceeded" in err_msg or "rate_limit_exceeded" in err_msg or "maximum context length" in err_msg:
+                yield f"data: {json.dumps({'token': ' [The attached file or conversation is too large for the model context window. Please attach a slightly smaller section of the file or start a new chat.]'})}\n\n"
+            else:
+                yield f"data: {json.dumps({'token': f' [Error from AI engine: {err_msg}]'})}\n\n"
         finally:
             yield "data: [DONE]\n\n"
 
