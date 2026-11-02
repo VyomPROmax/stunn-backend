@@ -158,7 +158,9 @@ def get_client() -> AsyncGroq:
 def identity_response(user_text: str) -> str | None:
     lower = user_text.lower().strip()
 
-    if "who are you" in lower or "what are you" in lower:
+    # Exact or near-exact inquiries only, so it does not trigger when files or complex prompts contain the phrase
+    clean = re.sub(r"[^\w\s]", "", lower).strip()
+    if clean in ("who are you", "what are you", "who r u", "what r u"):
         return (
             "I'm Stunn — your independent, agentic AI assistant. "
             "I use AI models and tools behind the scenes while you interact with me as one system."
@@ -166,7 +168,7 @@ def identity_response(user_text: str) -> str | None:
 
     # ===== CREATOR EASTER EGG =====
     if any(
-        x in lower
+        x == clean or clean.startswith(x)
         for x in (
             "who built stunn",
             "who made stunn",
