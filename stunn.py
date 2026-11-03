@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import re
@@ -131,6 +132,11 @@ class ChatResponse(BaseModel):
     text: str
     output: str
     sessionId: str | None = None
+
+class FileProcessRequest(BaseModel):
+    fileData: str  # base64-encoded file content
+    fileName: str
+    fileType: str
 
 MEMORY: Dict[str, List[dict]] = {}
 MAX_HISTORY_MESSAGES = 16
@@ -288,6 +294,49 @@ async def answer_as_stunn(
 @app.get("/health")
 async def health():
     return {"status": "online", "system": APP_NAME, "version": APP_VERSION, "model": MODEL}
+
+# ===== REAL FILE PROCESSING ENDPOINTS =====
+
+WHISPER_MODEL = "whisper-large-v3"
+VISION_MODEL = "llama-3.2-11b-vision-preview"
+
+@app.post("/process-audio")
+async def process_audio(request: FileProcessRequest):
+    """Transcribe audio/video files using Groq Whisper."""
+    try:
+        client = get_client()
+        file_bytes = base64.b64decode(request.fileData)
+        transcription = await client.audio.transcriptions.create(
+            file=(request.fileName, file_bytes),
+            model=WHISPER_MODEL,
+        )
+        return {"transcript": transcription.text, "error": None}
+    except Exception as exc:
+        print(f"[TRANSCRIPTION ERROR] {exc}")
+        return {"transcript": None, "error": str(exc)}
+
+@app.post("/process-image")
+async def process_image(request: FileProcessRequest):
+    """Describe an image using Groq vision model."""
+    try:
+        client = get_client()
+        data_url = f"data:{request.fileType};base64,{request.fileData}"
+        response = await client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Describe this image in comprehensive detail. Include all visible text, objects, people, colors, layout, composition, and any relevant information you can extract."},
+                    {"type": "image_url", "image_url": {"url": data_url}}
+                ]
+            }],
+            max_tokens=1024,
+        )
+        description = response.choices[0].message.content
+        return {"description": description, "error": None}
+    except Exception as exc:
+        print(f"[VISION ERROR] {exc}")
+        return {"description": None, "error": str(exc)}
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
