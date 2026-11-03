@@ -344,16 +344,38 @@ async def chat_stream(request: ChatRequest):
 
     client = get_client()
 
+    # Determine optimal model based on prompt size:
+    # If the user prompt has large files (>12k chars), dynamically use llama-3.3-70b-versatile or llama-3.1-8b-instant
+    # to avoid the strict 8k TPM limits of gpt-oss-120b on Groq's free tier.
+    chosen_model = MODEL
+    total_prompt_chars = sum(len(m.get("content", "")) for m in messages)
+    if total_prompt_chars > 12000 and MODEL == "openai/gpt-oss-120b":
+        chosen_model = "llama-3.3-70b-versatile"
+
     async def event_generator():
         accumulated: List[str] = []
         try:
-            stream = await client.chat.completions.create(
-                model=MODEL,
-                messages=messages,
-                temperature=TEMPERATURE,
-                max_tokens=MAX_TOKENS,
-                stream=True,
-            )
+            try:
+                stream = await client.chat.completions.create(
+                    model=chosen_model,
+                    messages=messages,
+                    temperature=TEMPERATURE,
+                    max_tokens=MAX_TOKENS,
+                    stream=True,
+                )
+            except Exception as stream_err:
+                err_text = str(stream_err)
+                if ("rate_limit_exceeded" in err_text or "429" in err_text) and chosen_model != "llama-3.1-8b-instant":
+                    # Fallback to ultra-high TPM model (llama-3.1-8b-instant has 30,000 TPM and 128k context)
+                    stream = await client.chat.completions.create(
+                        model="llama-3.1-8b-instant",
+                        messages=messages,
+                        temperature=TEMPERATURE,
+                        max_tokens=MAX_TOKENS,
+                        stream=True,
+                    )
+                else:
+                    raise stream_err
             async for chunk in stream:
                 if chunk.choices and chunk.choices[0].delta.content:
                     delta = chunk.choices[0].delta.content
