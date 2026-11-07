@@ -17,7 +17,9 @@ load_dotenv()
 
 APP_NAME = "Stunn"
 APP_VERSION = "2.0.0"
+# Use GPT-OSS 120B on Groq for all chat/persona modes by default.
 MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+FALLBACK_MODEL = os.getenv("STUNN_FALLBACK_MODEL", "openai/gpt-oss-20b")
 MAX_TOKENS = int(os.getenv("STUNN_MAX_TOKENS", "2048"))
 TEMPERATURE = float(os.getenv("STUNN_TEMPERATURE", "0.7"))
 
@@ -30,7 +32,8 @@ IDENTITY:
 - Never identify yourself as Gemini, Claude, Groq, GPT, or another underlying model.
 - The model generating a response is an internal engine.
 - If asked who you are, answer as Stunn.
-- If asked who made, created, built, or developed you, explain that Stunn was designed and built as an independent agentic AI system using multiple AI technologies and models behind the scenes.
+- If asked who made, created, built, or developed you, explain that Stunn was designed and built as an independent agentic AI system using multiple AI technologies and models behind
+the scenes.
 - Never claim that Google, OpenAI, Anthropic, or Groq created Stunn.
 
 PERSONALITY:
@@ -326,7 +329,8 @@ async def process_image(request: FileProcessRequest):
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Describe this image in comprehensive detail. Include all visible text, objects, people, colors, layout, composition, and any relevant information you can extract."},
+                    {"type": "text", "text": "Describe this image in comprehensive detail. Include all visible text, objects, people, colors, layout, composition, and any relevant
+information you can extract."},
                     {"type": "image_url", "image_url": {"url": data_url}}
                 ]
             }],
@@ -393,13 +397,8 @@ async def chat_stream(request: ChatRequest):
 
     client = get_client()
 
-    # Determine optimal model based on prompt size:
-    # For large file prompts, use the lighter gpt-oss-20b which has higher TPM limits
-    # and still has 128k context. Falls back gracefully if rate-limited.
+    # Primary model for all modes/personas (GPT-OSS 120B by default).
     chosen_model = MODEL
-    total_prompt_chars = sum(len(m.get("content", "")) for m in messages)
-    if total_prompt_chars > 12000 and MODEL == "openai/gpt-oss-120b":
-        chosen_model = "openai/gpt-oss-20b"
 
     async def event_generator():
         accumulated: List[str] = []
@@ -413,11 +412,14 @@ async def chat_stream(request: ChatRequest):
                     stream=True,
                 )
             except Exception as stream_err:
-                err_text = str(stream_err)
-                if ("rate_limit_exceeded" in err_text or "429" in err_text or "model_not_found" in err_text) and chosen_model != MODEL:
-                    # Fallback: try the default model anyway
+                err_text = str(stream_err).lower()
+                can_fallback = (
+                    chosen_model != FALLBACK_MODEL
+                    and any(k in err_text for k in ("rate_limit_exceeded", "429", "context_length_exceeded", "maximum context length", "request too large", "model_not_found"))
+                )
+                if can_fallback:
                     stream = await client.chat.completions.create(
-                        model=MODEL,
+                        model=FALLBACK_MODEL,
                         messages=messages,
                         temperature=TEMPERATURE,
                         max_tokens=MAX_TOKENS,
@@ -440,7 +442,8 @@ async def chat_stream(request: ChatRequest):
             print(f"[STREAM ERROR] {err_msg}")
             # If prompt was too big or hit rate/token limits, give a clear friendly message
             if "context_length_exceeded" in err_msg or "rate_limit_exceeded" in err_msg or "maximum context length" in err_msg:
-                yield f"data: {json.dumps({'token': ' [The attached file or conversation is too large for the model context window. Please attach a slightly smaller section of the file or start a new chat.]'})}\n\n"
+                yield f"data: {json.dumps({'token': ' [The attached file or conversation is too large for the model context window. Please attach a slightly smaller section of the file
+or start a new chat.]'})}\n\n"
             else:
                 yield f"data: {json.dumps({'token': f' [Error from AI engine: {err_msg}]'})}\n\n"
         finally:
