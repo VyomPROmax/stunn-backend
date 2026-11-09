@@ -463,13 +463,20 @@ async def answer_as_stunn(
 @app.get("/health")
 async def health():
     mode = "openai-compatible" if openai_compat_configured() else "groq"
+    lib = {"enabled": rag is not None}
+    if rag is not None:
+        try:
+            lib["store"] = "notion" if rag.using_notion() else "sqlite"
+            lib["db"] = f"notion:database:{getattr(rag, 'NOTION_LIBRARY_DATABASE_ID', '')}" if rag.using_notion() else str(getattr(rag, "DB_PATH", ""))
+        except Exception:
+            pass
     return {
         "status": "online",
         "system": APP_NAME,
         "version": APP_VERSION,
         "engine": mode,
         "models": PERSONA_MODELS if openai_compat_configured() else {"default": MODEL, "fallback": FALLBACK_MODEL},
-        "library": {"enabled": rag is not None, "db": getattr(rag, "DB_PATH", None).__str__() if rag else None},
+        "library": lib,
     }
 
 # ===== REAL FILE PROCESSING ENDPOINTS =====
@@ -686,7 +693,11 @@ async def library_ingest(request: LibraryIngestRequest):
 async def library_docs(userId: str = ""):
     if rag is None:
         raise HTTPException(status_code=503, detail="Library/RAG module is unavailable.")
-    return {"ok": True, "documents": rag.list_documents(userId or "")}
+    try:
+        docs = await rag.list_documents_async(userId or "")
+    except Exception:
+        docs = rag.list_documents(userId or "")
+    return {"ok": True, "documents": docs}
 
 
 @app.get("/library/search")
@@ -701,7 +712,10 @@ async def library_search(userId: str = "", q: str = "", name: str = "", docId: s
 async def library_delete(doc_id: str, userId: str = ""):
     if rag is None:
         raise HTTPException(status_code=503, detail="Library/RAG module is unavailable.")
-    deleted = rag.delete_document(userId or "", doc_id)
+    try:
+        deleted = await rag.delete_document_async(userId or "", doc_id)
+    except Exception:
+        deleted = rag.delete_document(userId or "", doc_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Document not found.")
     return {"ok": True, "deleted": doc_id}
@@ -710,7 +724,10 @@ async def library_delete(doc_id: str, userId: str = ""):
 if rag is not None:
     try:
         rag.init_db()
-        print(f"[LIBRARY] SQLite ready at {rag.DB_PATH}")
+        if getattr(rag, "using_notion", lambda: False)():
+            print(f"[LIBRARY] Notion store ready (database {getattr(rag, 'NOTION_LIBRARY_DATABASE_ID', '')})")
+        else:
+            print(f"[LIBRARY] SQLite ready at {rag.DB_PATH}")
     except Exception as exc:
         print(f"[LIBRARY INIT ERROR] {exc}")
 
